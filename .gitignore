@@ -1,0 +1,10 @@
+# Xcode / macOS
+build/
+DerivedData/
+*.xcuserstate
+xcuserdata/
+*.ipa
+
+# OS junk
+.DS_Store
+Thumbs.db
