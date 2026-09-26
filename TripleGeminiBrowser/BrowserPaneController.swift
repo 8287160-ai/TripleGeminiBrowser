@@ -175,7 +175,7 @@ final class BrowserPaneController: UIViewController, WKNavigationDelegate, WKUID
         if #available(iOS 14.0, *) {
             config.limitsNavigationsToAppBoundDomains = false
         }
-        if #available(iOS 15.0, *) {
+        if #available(iOS 15.4, *) {
             config.preferences.isElementFullscreenEnabled = true
         }
 
