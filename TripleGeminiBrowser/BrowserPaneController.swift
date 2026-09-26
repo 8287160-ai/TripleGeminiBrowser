@@ -50,7 +50,7 @@ final class BrowserPaneController: UIViewController, WKNavigationDelegate, WKUID
     private var progressObservation: NSKeyValueObservation?
     private var desktopMode = true
     private var cookieSaveWorkItem: DispatchWorkItem?
-    private weak var activePopup: LoginPopupViewController?
+    private var activePopup: LoginPopupOverlay?
 
     init(paneID: PaneID) {
         self.paneID = paneID
@@ -179,11 +179,25 @@ final class BrowserPaneController: UIViewController, WKNavigationDelegate, WKUID
             config.preferences.isElementFullscreenEnabled = true
         }
 
-        // Soften common WebView fingerprints Google checks during sign-in.
-        let antiDetect = """
-        Object.defineProperty(navigator, 'standalone', { get: function() { return false; } });
+        // Soften WebView fingerprints + stop iOS from zooming the whole page on input focus.
+        let bootScript = """
+        (function() {
+          try {
+            Object.defineProperty(navigator, 'standalone', { get: function() { return false; } });
+          } catch (e) {}
+          var metas = document.querySelectorAll('meta[name=viewport]');
+          var content = 'width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no';
+          if (metas.length) {
+            metas[0].setAttribute('content', content);
+          } else {
+            var m = document.createElement('meta');
+            m.name = 'viewport';
+            m.content = content;
+            document.head && document.head.appendChild(m);
+          }
+        })();
         """
-        let script = WKUserScript(source: antiDetect, injectionTime: .atDocumentStart, forMainFrameOnly: false)
+        let script = WKUserScript(source: bootScript, injectionTime: .atDocumentEnd, forMainFrameOnly: true)
         config.userContentController.addUserScript(script)
 
         webConfig = config
@@ -194,6 +208,9 @@ final class BrowserPaneController: UIViewController, WKNavigationDelegate, WKUID
         wv.uiDelegate = self
         wv.allowsBackForwardNavigationGestures = true
         wv.scrollView.contentInsetAdjustmentBehavior = .never
+        wv.scrollView.minimumZoomScale = 1
+        wv.scrollView.maximumZoomScale = 1
+        wv.scrollView.pinchGestureRecognizer?.isEnabled = false
         wv.customUserAgent = currentUA
         if #available(iOS 16.4, *) {
             wv.isInspectable = true
@@ -405,7 +422,10 @@ final class BrowserPaneController: UIViewController, WKNavigationDelegate, WKUID
     }
 
     private func presentLoginPopup(request: URLRequest?) {
-        // Clone config so popup shares data store + process pool with this pane.
+        // Remove previous overlay on this pane only.
+        activePopup?.removeFromSuperview()
+        activePopup = nil
+
         let popupConfig = WKWebViewConfiguration()
         popupConfig.websiteDataStore = webConfig.websiteDataStore
         popupConfig.processPool = webConfig.processPool
@@ -413,17 +433,24 @@ final class BrowserPaneController: UIViewController, WKNavigationDelegate, WKUID
         popupConfig.preferences.javaScriptCanOpenWindowsAutomatically = true
         popupConfig.allowsInlineMediaPlayback = true
 
-        let popup = LoginPopupViewController(
-            configuration: popupConfig,
-            request: request,
-            userAgent: currentUA
-        ) { [weak self] in
+        let overlay = LoginPopupOverlay(configuration: popupConfig, userAgent: currentUA)
+        overlay.onClose = { [weak self] in
             self?.activePopup = nil
             self?.scheduleSaveCookies()
             self?.webView.reload()
         }
-        activePopup = popup
-        present(popup, animated: true)
+        view.addSubview(overlay)
+        NSLayoutConstraint.activate([
+            overlay.topAnchor.constraint(equalTo: topBar.bottomAnchor),
+            overlay.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            overlay.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            overlay.bottomAnchor.constraint(equalTo: view.bottomAnchor),
+        ])
+        activePopup = overlay
+
+        if let request {
+            overlay.load(request)
+        }
     }
 
     // MARK: - WKNavigationDelegate
