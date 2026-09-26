@@ -37,11 +37,12 @@ chmod +x scripts/build_trollstore_ipa.sh
 
 产物：`build/TripleGeminiBrowser-trollstore.ipa`
 
-## 使用
+## 使用（保证三栏各登各的号）
 
-1. 横持手机打开 App
-2. 三栏会各自打开 `gemini.google.com`
-3. 在左 / 中 / 右分别登录三个 Google 账号
-4. 地址栏可改成任意网址（普通浏览器）
+1. 横持手机打开 App  
+2. 每一栏点钥匙图标（登录 Google）→ 进入账号添加页  
+3. 左 / 中 / 右各登一个不同的 Google 账号  
+4. 登录完成后会回到 Gemini；三栏 Cookie 相互隔离，不会串号  
 
-若某栏登录异常：点该栏「清除登录」后再登一次。
+若提示浏览器不安全：确认该栏是**桌面 UA**（电脑图标为蓝色），再点登录。  
+若某栏要换号：点「清除登录」图标，再点钥匙重新登。

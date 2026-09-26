@@ -19,20 +19,29 @@ enum PaneID: Int, CaseIterable {
 
 enum BrowserDefaults {
     static let homeURL = URL(string: "https://gemini.google.com/app")!
+    /// Add-session URL forces account picker / new login for this pane.
+    static let googleLoginURL = URL(
+        string: "https://accounts.google.com/AddSession?hl=zh-CN&continue=https%3A%2F%2Fgemini.google.com%2Fapp"
+    )!
+    /// Safari macOS UA — avoids Google "disallowed_useragent" WebView blocks.
     static let desktopUA =
-        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15"
+        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.4 Safari/605.1.15"
+    static let mobileSafariUA =
+        "Mozilla/5.0 (iPhone; CPU iPhone OS 17_4 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.4 Mobile/15E148 Safari/604.1"
 }
 
 final class BrowserPaneController: UIViewController, WKNavigationDelegate, WKUIDelegate, UITextFieldDelegate {
     let paneID: PaneID
 
     private var webView: WKWebView!
+    private var webConfig: WKWebViewConfiguration!
     private let topBar = UIView()
     private let progressView = UIProgressView(progressViewStyle: .bar)
     private let backButton = UIButton(type: .system)
     private let forwardButton = UIButton(type: .system)
     private let reloadButton = UIButton(type: .system)
     private let homeButton = UIButton(type: .system)
+    private let loginButton = UIButton(type: .system)
     private let clearButton = UIButton(type: .system)
     private let desktopButton = UIButton(type: .system)
     private let urlField = UITextField()
@@ -41,6 +50,7 @@ final class BrowserPaneController: UIViewController, WKNavigationDelegate, WKUID
     private var progressObservation: NSKeyValueObservation?
     private var desktopMode = true
     private var cookieSaveWorkItem: DispatchWorkItem?
+    private weak var activePopup: LoginPopupViewController?
 
     init(paneID: PaneID) {
         self.paneID = paneID
@@ -55,11 +65,16 @@ final class BrowserPaneController: UIViewController, WKNavigationDelegate, WKUID
         view.backgroundColor = UIColor(white: 0.12, alpha: 1)
         buildChrome()
         buildWebView()
-        loadInitialURL()
+        // Restore cookies first (iOS 15/16), then open page — otherwise Google login is lost.
+        prepareSessionThenLoad()
     }
 
     deinit {
         progressObservation?.invalidate()
+    }
+
+    private var currentUA: String {
+        desktopMode ? BrowserDefaults.desktopUA : BrowserDefaults.mobileSafariUA
     }
 
     // MARK: - UI
@@ -78,8 +93,10 @@ final class BrowserPaneController: UIViewController, WKNavigationDelegate, WKUID
         configureNavButton(forwardButton, systemName: "chevron.right", action: #selector(goForward))
         configureNavButton(reloadButton, systemName: "arrow.clockwise", action: #selector(reloadOrStop))
         configureNavButton(homeButton, systemName: "house", action: #selector(goHome))
+        configureNavButton(loginButton, systemName: "person.badge.key", action: #selector(openGoogleLogin))
         configureNavButton(clearButton, systemName: "person.crop.circle.badge.minus", action: #selector(clearLogin))
         configureNavButton(desktopButton, systemName: "desktopcomputer", action: #selector(toggleDesktop))
+        desktopButton.tintColor = .systemBlue
 
         urlField.translatesAutoresizingMaskIntoConstraints = false
         urlField.borderStyle = .roundedRect
@@ -99,7 +116,7 @@ final class BrowserPaneController: UIViewController, WKNavigationDelegate, WKUID
         progressView.isHidden = true
 
         let navStack = UIStackView(arrangedSubviews: [
-            backButton, forwardButton, reloadButton, homeButton, desktopButton, clearButton
+            backButton, forwardButton, reloadButton, homeButton, loginButton, desktopButton, clearButton
         ])
         navStack.axis = .horizontal
         navStack.spacing = 2
@@ -138,11 +155,11 @@ final class BrowserPaneController: UIViewController, WKNavigationDelegate, WKUID
     }
 
     private func configureNavButton(_ button: UIButton, systemName: String, action: Selector) {
-        let config = UIImage.SymbolConfiguration(pointSize: 14, weight: .semibold)
+        let config = UIImage.SymbolConfiguration(pointSize: 13, weight: .semibold)
         button.setImage(UIImage(systemName: systemName, withConfiguration: config), for: .normal)
         button.tintColor = .label
         button.translatesAutoresizingMaskIntoConstraints = false
-        button.widthAnchor.constraint(equalToConstant: 28).isActive = true
+        button.widthAnchor.constraint(equalToConstant: 26).isActive = true
         button.addTarget(self, action: action, for: .touchUpInside)
     }
 
@@ -154,9 +171,22 @@ final class BrowserPaneController: UIViewController, WKNavigationDelegate, WKUID
         config.preferences.javaScriptCanOpenWindowsAutomatically = true
         config.allowsInlineMediaPlayback = true
         config.mediaTypesRequiringUserActionForPlayback = []
+        config.suppressesIncrementalRendering = false
+        if #available(iOS 14.0, *) {
+            config.limitsNavigationsToAppBoundDomains = false
+        }
         if #available(iOS 15.0, *) {
             config.preferences.isElementFullscreenEnabled = true
         }
+
+        // Soften common WebView fingerprints Google checks during sign-in.
+        let antiDetect = """
+        Object.defineProperty(navigator, 'standalone', { get: function() { return false; } });
+        """
+        let script = WKUserScript(source: antiDetect, injectionTime: .atDocumentStart, forMainFrameOnly: false)
+        config.userContentController.addUserScript(script)
+
+        webConfig = config
 
         let wv = WKWebView(frame: .zero, configuration: config)
         wv.translatesAutoresizingMaskIntoConstraints = false
@@ -164,8 +194,9 @@ final class BrowserPaneController: UIViewController, WKNavigationDelegate, WKUID
         wv.uiDelegate = self
         wv.allowsBackForwardNavigationGestures = true
         wv.scrollView.contentInsetAdjustmentBehavior = .never
-        if desktopMode {
-            wv.customUserAgent = BrowserDefaults.desktopUA
+        wv.customUserAgent = currentUA
+        if #available(iOS 16.4, *) {
+            wv.isInspectable = true
         }
         view.addSubview(wv)
 
@@ -180,13 +211,10 @@ final class BrowserPaneController: UIViewController, WKNavigationDelegate, WKUID
         progressObservation = wv.observe(\.estimatedProgress, options: [.new]) { [weak self] webView, _ in
             self?.updateProgress(webView.estimatedProgress)
         }
-
-        restoreCookiesIfNeeded()
     }
 
     private static func makeDataStore(for pane: PaneID) -> WKWebsiteDataStore {
         if #available(iOS 17.0, *) {
-            // Stable UUID per pane so logins survive relaunches.
             let defaults = UserDefaults.standard
             let key = "dataStoreID-\(pane.storageKey)"
             let uuid: UUID
@@ -198,20 +226,31 @@ final class BrowserPaneController: UIViewController, WKNavigationDelegate, WKUID
             }
             return WKWebsiteDataStore(forIdentifier: uuid)
         }
-        // iOS 15/16: non-persistent store + cookie files (see restore/save).
         return .nonPersistent()
     }
 
-    // MARK: - Navigation actions
+    // MARK: - Session bootstrap
+
+    private func prepareSessionThenLoad() {
+        restoreCookies { [weak self] in
+            DispatchQueue.main.async {
+                self?.loadInitialURL()
+            }
+        }
+    }
 
     private func loadInitialURL() {
         let key = "lastURL-\(paneID.storageKey)"
-        if let saved = UserDefaults.standard.string(forKey: key), let url = URL(string: saved) {
+        if let saved = UserDefaults.standard.string(forKey: key),
+           let url = URL(string: saved),
+           !saved.isEmpty {
             webView.load(URLRequest(url: url))
         } else {
             webView.load(URLRequest(url: BrowserDefaults.homeURL))
         }
     }
+
+    // MARK: - Navigation actions
 
     @objc private func goBack() { if webView.canGoBack { webView.goBack() } }
     @objc private func goForward() { if webView.canGoForward { webView.goForward() } }
@@ -228,9 +267,14 @@ final class BrowserPaneController: UIViewController, WKNavigationDelegate, WKUID
         webView.load(URLRequest(url: BrowserDefaults.homeURL))
     }
 
+    /// Dedicated Google AddSession page — reliable way to log into a different account per pane.
+    @objc private func openGoogleLogin() {
+        webView.load(URLRequest(url: BrowserDefaults.googleLoginURL))
+    }
+
     @objc private func toggleDesktop() {
         desktopMode.toggle()
-        webView.customUserAgent = desktopMode ? BrowserDefaults.desktopUA : nil
+        webView.customUserAgent = currentUA
         desktopButton.tintColor = desktopMode ? .systemBlue : .label
         webView.reload()
     }
@@ -242,7 +286,7 @@ final class BrowserPaneController: UIViewController, WKNavigationDelegate, WKUID
             store.removeData(ofTypes: types, for: records) { [weak self] in
                 self?.deleteCookieFile()
                 DispatchQueue.main.async {
-                    self?.webView.load(URLRequest(url: BrowserDefaults.homeURL))
+                    self?.webView.load(URLRequest(url: BrowserDefaults.googleLoginURL))
                 }
             }
         }
@@ -302,15 +346,28 @@ final class BrowserPaneController: UIViewController, WKNavigationDelegate, WKUID
         try? FileManager.default.removeItem(at: cookieFileURL)
     }
 
-    private func restoreCookiesIfNeeded() {
-        if #available(iOS 17.0, *) { return }
+    private func restoreCookies(completion: @escaping () -> Void) {
+        if #available(iOS 17.0, *) {
+            completion()
+            return
+        }
         guard let data = try? Data(contentsOf: cookieFileURL),
-              let array = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]] else { return }
+              let array = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]],
+              !array.isEmpty else {
+            completion()
+            return
+        }
         let store = webView.configuration.websiteDataStore.httpCookieStore
+        let group = DispatchGroup()
         for dict in array {
             if let cookie = HTTPCookie(properties: Self.cookieProperties(from: dict)) {
-                store.setCookie(cookie)
+                group.enter()
+                store.setCookie(cookie) { group.leave() }
             }
+        }
+        group.notify(queue: .main) {
+            // Give WK a brief beat to attach cookies before first navigation.
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.15, execute: completion)
         }
     }
 
@@ -345,6 +402,28 @@ final class BrowserPaneController: UIViewController, WKNavigationDelegate, WKUID
             props[HTTPCookiePropertyKey(key)] = value
         }
         return props
+    }
+
+    private func presentLoginPopup(request: URLRequest?) {
+        // Clone config so popup shares data store + process pool with this pane.
+        let popupConfig = WKWebViewConfiguration()
+        popupConfig.websiteDataStore = webConfig.websiteDataStore
+        popupConfig.processPool = webConfig.processPool
+        popupConfig.defaultWebpagePreferences.allowsContentJavaScript = true
+        popupConfig.preferences.javaScriptCanOpenWindowsAutomatically = true
+        popupConfig.allowsInlineMediaPlayback = true
+
+        let popup = LoginPopupViewController(
+            configuration: popupConfig,
+            request: request,
+            userAgent: currentUA
+        ) { [weak self] in
+            self?.activePopup = nil
+            self?.scheduleSaveCookies()
+            self?.webView.reload()
+        }
+        activePopup = popup
+        present(popup, animated: true)
     }
 
     // MARK: - WKNavigationDelegate
@@ -384,10 +463,16 @@ final class BrowserPaneController: UIViewController, WKNavigationDelegate, WKUID
         for navigationAction: WKNavigationAction,
         windowFeatures: WKWindowFeatures
     ) -> WKWebView? {
-        if navigationAction.targetFrame == nil, let url = navigationAction.request.url {
-            webView.load(URLRequest(url: url))
+        // Google account chooser / OAuth often uses window.open — keep it in a real popup
+        // that shares this pane's cookie jar.
+        if navigationAction.targetFrame == nil {
+            presentLoginPopup(request: navigationAction.request)
         }
         return nil
+    }
+
+    func webViewDidClose(_ webView: WKWebView) {
+        scheduleSaveCookies()
     }
 
     func webView(
@@ -410,6 +495,22 @@ final class BrowserPaneController: UIViewController, WKNavigationDelegate, WKUID
         let alert = UIAlertController(title: paneID.title, message: message, preferredStyle: .alert)
         alert.addAction(UIAlertAction(title: "取消", style: .cancel) { _ in completionHandler(false) })
         alert.addAction(UIAlertAction(title: "好", style: .default) { _ in completionHandler(true) })
+        present(alert, animated: true)
+    }
+
+    func webView(
+        _ webView: WKWebView,
+        runJavaScriptTextInputPanelWithPrompt prompt: String,
+        defaultText: String?,
+        initiatedByFrame frame: WKFrameInfo,
+        completionHandler: @escaping (String?) -> Void
+    ) {
+        let alert = UIAlertController(title: paneID.title, message: prompt, preferredStyle: .alert)
+        alert.addTextField { $0.text = defaultText }
+        alert.addAction(UIAlertAction(title: "取消", style: .cancel) { _ in completionHandler(nil) })
+        alert.addAction(UIAlertAction(title: "好", style: .default) { _ in
+            completionHandler(alert.textFields?.first?.text)
+        })
         present(alert, animated: true)
     }
 }

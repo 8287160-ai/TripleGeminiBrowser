@@ -11,12 +11,14 @@
 		A10000000000000000000002 /* MainViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000002 /* MainViewController.swift */; };
 		A10000000000000000000003 /* BrowserPaneController.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000003 /* BrowserPaneController.swift */; };
 		A10000000000000000000004 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000004 /* Assets.xcassets */; };
+		A10000000000000000000005 /* LoginPopupViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000007 /* LoginPopupViewController.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
 		A20000000000000000000001 /* AppDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppDelegate.swift; sourceTree = "<group>"; };
 		A20000000000000000000002 /* MainViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MainViewController.swift; sourceTree = "<group>"; };
 		A20000000000000000000003 /* BrowserPaneController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BrowserPaneController.swift; sourceTree = "<group>"; };
+		A20000000000000000000007 /* LoginPopupViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LoginPopupViewController.swift; sourceTree = "<group>"; };
 		A20000000000000000000004 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		A20000000000000000000005 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		A20000000000000000000006 /* TripleGeminiBrowser.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = TripleGeminiBrowser.entitlements; sourceTree = "<group>"; };
@@ -48,6 +50,7 @@
 				A20000000000000000000001 /* AppDelegate.swift */,
 				A20000000000000000000002 /* MainViewController.swift */,
 				A20000000000000000000003 /* BrowserPaneController.swift */,
+				A20000000000000000000007 /* LoginPopupViewController.swift */,
 				A20000000000000000000004 /* Assets.xcassets */,
 				A20000000000000000000005 /* Info.plist */,
 				A20000000000000000000006 /* TripleGeminiBrowser.entitlements */,
@@ -136,6 +139,7 @@
 				A10000000000000000000001 /* AppDelegate.swift in Sources */,
 				A10000000000000000000002 /* MainViewController.swift in Sources */,
 				A10000000000000000000003 /* BrowserPaneController.swift in Sources */,
+				A10000000000000000000005 /* LoginPopupViewController.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
