@@ -48,8 +48,8 @@ final class BrowserPaneController: UIViewController, WKNavigationDelegate, WKUID
     private let titleLabel = UILabel()
 
     private var progressObservation: NSKeyValueObservation?
-    /// Default mobile layout — fits narrow 1/3 panes. Toggle desktop for Gemini if needed.
-    private var desktopMode = false
+    /// Desktop site by default; pageZoom fits whole page into the narrow pane (overview).
+    private var desktopMode = true
     private var cookieSaveWorkItem: DispatchWorkItem?
     private var activePopup: LoginPopupOverlay?
 
@@ -97,7 +97,7 @@ final class BrowserPaneController: UIViewController, WKNavigationDelegate, WKUID
         configureNavButton(loginButton, systemName: "person.badge.key", action: #selector(openGoogleLogin))
         configureNavButton(clearButton, systemName: "person.crop.circle.badge.minus", action: #selector(clearLogin))
         configureNavButton(desktopButton, systemName: "desktopcomputer", action: #selector(toggleDesktop))
-        desktopButton.tintColor = .label
+        desktopButton.tintColor = .systemBlue
 
         urlField.translatesAutoresizingMaskIntoConstraints = false
         urlField.borderStyle = .roundedRect
@@ -180,25 +180,15 @@ final class BrowserPaneController: UIViewController, WKNavigationDelegate, WKUID
             config.preferences.isElementFullscreenEnabled = true
         }
 
-        // Soften WebView fingerprints + stop iOS from zooming the whole page on input focus.
+        // Soften WebView fingerprints only — do NOT lock scale (user can pinch-zoom).
         let bootScript = """
         (function() {
           try {
             Object.defineProperty(navigator, 'standalone', { get: function() { return false; } });
           } catch (e) {}
-          var metas = document.querySelectorAll('meta[name=viewport]');
-          var content = 'width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no';
-          if (metas.length) {
-            metas[0].setAttribute('content', content);
-          } else {
-            var m = document.createElement('meta');
-            m.name = 'viewport';
-            m.content = content;
-            document.head && document.head.appendChild(m);
-          }
         })();
         """
-        let script = WKUserScript(source: bootScript, injectionTime: .atDocumentEnd, forMainFrameOnly: true)
+        let script = WKUserScript(source: bootScript, injectionTime: .atDocumentStart, forMainFrameOnly: false)
         config.userContentController.addUserScript(script)
 
         webConfig = config
@@ -209,9 +199,11 @@ final class BrowserPaneController: UIViewController, WKNavigationDelegate, WKUID
         wv.uiDelegate = self
         wv.allowsBackForwardNavigationGestures = true
         wv.scrollView.contentInsetAdjustmentBehavior = .never
-        // Allow light pinch; pageZoom handles default fit-to-pane.
+        // Pinch to zoom in/out from the overview scale.
         wv.scrollView.minimumZoomScale = 1
-        wv.scrollView.maximumZoomScale = 3
+        wv.scrollView.maximumZoomScale = 5
+        wv.scrollView.bouncesZoom = true
+        wv.scrollView.pinchGestureRecognizer?.isEnabled = true
         wv.customUserAgent = currentUA
         if #available(iOS 16.4, *) {
             wv.isInspectable = true
@@ -236,17 +228,16 @@ final class BrowserPaneController: UIViewController, WKNavigationDelegate, WKUID
         updatePageZoom()
     }
 
-    /// Shrink desktop pages so a 1/3-width column stays readable (not giant).
+    /// 全览：把桌面版整页缩进本栏宽度；之后可用双指捏合放大。
     private func updatePageZoom() {
         guard webView != nil else { return }
         let width = webView.bounds.width
         guard width > 1 else { return }
         if desktopMode {
-            // Treat site as ~980pt wide and scale into this pane.
-            webView.pageZoom = max(0.4, min(1.0, width / 980.0))
+            // Overview fit: assume ~1280px desktop layout.
+            webView.pageZoom = max(0.35, min(1.0, width / 1280.0))
         } else {
-            // Mobile layout already targets narrow screens; slight shrink if still tight.
-            webView.pageZoom = max(0.75, min(1.0, width / 390.0))
+            webView.pageZoom = 1.0
         }
     }
 
