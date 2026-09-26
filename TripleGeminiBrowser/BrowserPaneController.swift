@@ -48,7 +48,8 @@ final class BrowserPaneController: UIViewController, WKNavigationDelegate, WKUID
     private let titleLabel = UILabel()
 
     private var progressObservation: NSKeyValueObservation?
-    private var desktopMode = true
+    /// Default mobile layout — fits narrow 1/3 panes. Toggle desktop for Gemini if needed.
+    private var desktopMode = false
     private var cookieSaveWorkItem: DispatchWorkItem?
     private var activePopup: LoginPopupOverlay?
 
@@ -96,7 +97,7 @@ final class BrowserPaneController: UIViewController, WKNavigationDelegate, WKUID
         configureNavButton(loginButton, systemName: "person.badge.key", action: #selector(openGoogleLogin))
         configureNavButton(clearButton, systemName: "person.crop.circle.badge.minus", action: #selector(clearLogin))
         configureNavButton(desktopButton, systemName: "desktopcomputer", action: #selector(toggleDesktop))
-        desktopButton.tintColor = .systemBlue
+        desktopButton.tintColor = .label
 
         urlField.translatesAutoresizingMaskIntoConstraints = false
         urlField.borderStyle = .roundedRect
@@ -208,9 +209,9 @@ final class BrowserPaneController: UIViewController, WKNavigationDelegate, WKUID
         wv.uiDelegate = self
         wv.allowsBackForwardNavigationGestures = true
         wv.scrollView.contentInsetAdjustmentBehavior = .never
+        // Allow light pinch; pageZoom handles default fit-to-pane.
         wv.scrollView.minimumZoomScale = 1
-        wv.scrollView.maximumZoomScale = 1
-        wv.scrollView.pinchGestureRecognizer?.isEnabled = false
+        wv.scrollView.maximumZoomScale = 3
         wv.customUserAgent = currentUA
         if #available(iOS 16.4, *) {
             wv.isInspectable = true
@@ -227,6 +228,25 @@ final class BrowserPaneController: UIViewController, WKNavigationDelegate, WKUID
         webView = wv
         progressObservation = wv.observe(\.estimatedProgress, options: [.new]) { [weak self] webView, _ in
             self?.updateProgress(webView.estimatedProgress)
+        }
+    }
+
+    override func viewDidLayoutSubviews() {
+        super.viewDidLayoutSubviews()
+        updatePageZoom()
+    }
+
+    /// Shrink desktop pages so a 1/3-width column stays readable (not giant).
+    private func updatePageZoom() {
+        guard webView != nil else { return }
+        let width = webView.bounds.width
+        guard width > 1 else { return }
+        if desktopMode {
+            // Treat site as ~980pt wide and scale into this pane.
+            webView.pageZoom = max(0.4, min(1.0, width / 980.0))
+        } else {
+            // Mobile layout already targets narrow screens; slight shrink if still tight.
+            webView.pageZoom = max(0.75, min(1.0, width / 390.0))
         }
     }
 
@@ -293,6 +313,7 @@ final class BrowserPaneController: UIViewController, WKNavigationDelegate, WKUID
         desktopMode.toggle()
         webView.customUserAgent = currentUA
         desktopButton.tintColor = desktopMode ? .systemBlue : .label
+        updatePageZoom()
         webView.reload()
     }
 
@@ -461,6 +482,7 @@ final class BrowserPaneController: UIViewController, WKNavigationDelegate, WKUID
 
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
         updateURLBar()
+        updatePageZoom()
         scheduleSaveCookies()
     }
 
